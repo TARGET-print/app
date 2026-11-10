@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#373435">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="تارجت">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>تارجت</title>
+<style>
+html,body{margin:0;height:100%;background:#373435;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;overflow:hidden}
+#app{position:fixed;top:env(safe-area-inset-top);left:0;right:0;bottom:0;width:100%;height:calc(100% - env(safe-area-inset-top));border:0;background:#f4f3f3}
+#splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#fff;background:#373435;transition:opacity .4s}
+#splash img{width:96px;height:96px;border-radius:22px}
+#splash.off{opacity:0;pointer-events:none}
+.bar{position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9;background:#1f1d1e;color:#fff;border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);display:none;gap:10px;align-items:center;font-size:14px;line-height:1.6}
+.bar.on{display:flex}
+.bar b{display:block;font-size:15px}
+.bar button{font:inherit;font-weight:800;border:0;border-radius:10px;padding:9px 14px;cursor:pointer;white-space:nowrap}
+.bar .y{background:#fff;color:#1f1d1e}.bar .n{background:transparent;color:#bbb}
+#msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;text-align:center;color:#fff;padding:24px;background:#373435;font-size:17px;line-height:1.9}
+</style>
+</head>
+<body>
+<iframe id="app" title="تارجت" allow="clipboard-write; clipboard-read"></iframe>
+<div id="splash"><img src="icon-192.png" alt=""><div>تارجت</div></div>
+<div id="msg"></div>
+<div class="bar" id="bar"><div style="flex:1" id="barTxt"></div><button class="y" id="barYes">فعّل</button><button class="n" id="barNo">بعدين</button></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+<script>
+const EXEC = 'https://script.google.com/macros/s/AKfycbxXoXz7H8Kb0afX-TQkG5JfJiINWktFC-xvlZFwd_qnKjfQABXvDiX4onEMhOcGQca2/exec';
+const $ = id => document.getElementById(id);
+const store = { get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+let t = (new URLSearchParams(location.search).get('t') || '').replace(/[^A-Za-z0-9]/g, '');
+if (t) store.set('tg_t', t); else t = store.get('tg_t') || '';
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+if (!t) { $('msg').style.display = 'flex'; $('msg').innerHTML = 'افتح الرابط الخاص بيك اللي اتبعتلك على الواتساب 🙏'; $('splash').classList.add('off'); }
+else { $('app').src = EXEC + '?t=' + t; $('app').onload = () => setTimeout(() => $('splash').classList.add('off'), 300); setTimeout(() => $('splash').classList.add('off'), 6000); }
+
+let CFG = null, SRC = null, REG = null;
+const reply = m => { try { SRC && SRC.postMessage(m, '*'); } catch (e) {} };
+function bar(txt, yes, onYes) {
+  if (store.get('tg_bar_no') && Date.now() - Number(store.get('tg_bar_no')) < 3 * 864e5) return;
+  $('barTxt').innerHTML = txt; $('barYes').textContent = yes; $('barYes').style.display = onYes ? '' : 'none';
+  $('bar').classList.add('on');
+  $('barYes').onclick = () => { $('bar').classList.remove('on'); onYes && onYes(); };
+  $('barNo').onclick = () => { $('bar').classList.remove('on'); store.set('tg_bar_no', String(Date.now())); };
+}
+async function getTok() {
+  try {
+    const tok = await firebase.messaging().getToken({ vapidKey: CFG.vapid, serviceWorkerRegistration: REG });
+    if (tok) reply({ type: 'tg-push-token', token: tok, ua: navigator.userAgent });
+  } catch (e) { reply({ type: 'tg-push-state', state: 'error', err: String(e && e.message || e) }); }
+}
+async function init() {
+  const supported = 'serviceWorker' in navigator && 'Notification' in window && 'PushManager' in window;
+  if (!supported) {
+    reply({ type: 'tg-push-state', state: 'unsupported' });
+    if (isIOS && !standalone) bar('<b>📲 نزّل التطبيق علشان توصلك الإشعارات</b>دوس زرار المشاركة ⬆️ تحت ← Add to Home Screen ← وافتحه من الأيقونة', '', null);
+    return;
+  }
+  try { if (!firebase.apps.length) firebase.initializeApp(CFG.config); REG = await navigator.serviceWorker.register('sw.js'); }
+  catch (e) { reply({ type: 'tg-push-state', state: 'error', err: String(e) }); return; }
+  if (Notification.permission === 'granted') return getTok();
+  if (Notification.permission === 'denied') return reply({ type: 'tg-push-state', state: 'denied' });
+  bar('<b>🔔 فعّل الإشعارات</b>علشان توصلك المهام الجديدة والتحديثات أول بأول', 'فعّل', async () => {
+    const p = await Notification.requestPermission();
+    if (p === 'granted') getTok(); else reply({ type: 'tg-push-state', state: p });
+  });
+}
+addEventListener('message', e => {
+  let h = ''; try { h = new URL(e.origin).hostname; } catch (x) {}
+  if (!/(^|\.)googleusercontent\.com$|(^|\.)google\.com$/.test(h)) return;
+  const m = e.data || {};
+  if (m.type === 'tg-push-cfg' && m.config && m.vapid) { CFG = m; SRC = e.source; init(); }
+});
+</script>
+</body>
+</html>
